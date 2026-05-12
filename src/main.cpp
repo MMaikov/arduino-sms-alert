@@ -85,9 +85,44 @@ static size_t begins_with(const char* line, const char* prefix_P) {
 static void process_line(const char* line) {
 	size_t n;
 	if (begins_with(line, PSTR("help")) > 0) {
-		Serial.println(F("Help message (TODO):"));
-		Serial.println(F("<help> for this help message"));
-		Serial.println(F("<led on|off> to turn on or off the builtin LED"));
+		Serial.println(F("Commands:"));
+		Serial.println(F("  help                    Show this menu"));
+		Serial.println(F("  examples <|detailed>    Show examples for the commands"));
+		Serial.println(F("  led <on|off>            Turn built-in LED on or off"));
+		Serial.println(F("  sms <AT+cmd>            Send command to GSM module"));
+		Serial.println();
+	} else if ((n=begins_with(line, PSTR("examples"))) > 0) {
+		bool detailed = false;
+		if (begins_with(line+n, PSTR("detailed")) > 0) {
+			detailed = true;
+		}
+
+		Serial.println(F("Examples:"));
+		Serial.println(F("  sms AT+CSQ       Check signal strength <rssi>,<ber>"));
+		if (detailed) {
+			Serial.println(F("                   Received Signal Strength Indication (rssi) and Bit Error Rate (ber)"));
+			Serial.println(F("                   rssi 0-9: marginal signal strength (-113 to -95 dBm)"));
+			Serial.println(F("                   rssi 10-14: ok signal strength (-93 to -85 dBm), minimum for reliable SMS"));
+			Serial.println(F("                   rssi 15-19: good signal strength (-83 to -75 dBm), stable LTE connection"));
+			Serial.println(F("                   rssi 20-31: excellent signal strength (-73 to -51 dBm), strongest possible signal"));
+			Serial.println(F("                   rssi/ber 99: No signal or not detected / not measured or signal too weak to measure"));
+		}
+		Serial.println(F("  sms AT+CPIN?     Check SIM status"));
+		Serial.println(F("  sms AT+CREG?     Check network registration status <n>,<stat>"));
+		if (detailed) {                      
+			Serial.println(F("                   stat 0: Not registered - The module is not searching for a new operator"));
+			Serial.println(F("                   stat 1: Registered (home) - You are on your carrier's native network."));
+			Serial.println(F("                   stat 2: Searching - The module is hunting for a base station"));
+			Serial.println(F("                   stat 3: Registration denied - The tower sees you, but won't let you in. Often SIM or IMEI issue."));
+			Serial.println(F("                   stat 4: Unknown - Rare, usually indicates a hardware or antenna fault"));
+			Serial.println(F("                   stat 5: Registered (roaming) - You are on partner network. SMS will still work, but may cost more"));
+		}                                    
+		Serial.println(F("  sms ATI          Get hardware information"));
+		Serial.println(F("  sms ATE<0|1>     Turn echo off or on"));
+		Serial.println(F("  sms AT           Check communication link"));
+		Serial.println(F("  sms AT+CMGF=1    Set mode to text mode"));
+		Serial.println(F("  sms AT+CMGS=\"+372 1234567890\"     Send SMS, message contents not supported"));
+		Serial.println();
 	} else if ((n=begins_with(line, PSTR("led"))) > 0) {
 		if (begins_with(line + n, PSTR("on")) > 0) {
 			digitalWrite(LED_BUILTIN, HIGH);
@@ -118,6 +153,6 @@ static void process_line(const char* line) {
 	} else {
 		Serial.print(F("Unkown command '"));
 		Serial.print(line);
-		Serial.println(F("'! Write 'help' to get help message."));
+		Serial.println(F("'. Write 'help' to get help message."));
 	}
 }
