@@ -276,6 +276,8 @@ static bool process_line(const char* line) {
 		Serial.println(F("  examples <|detailed>    Show examples for the commands"));
 		Serial.println(F("  led <on|off>            Turn built-in LED on or off"));
 		Serial.println(F("  at <AT+cmd>             Send command to GSM module"));
+		Serial.println(F("  get <number>            Get parameter data"));
+		Serial.println(F("  set <number>            Set parameter data"));
 		Serial.println();
 	} else if ((n=begins_with(line, PSTR("examples"))) > 0) {
 		bool detailed = false;
