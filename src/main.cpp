@@ -1,7 +1,5 @@
 #include <Arduino.h>
 
-#include "Config.hpp"
-#include "SMS.hpp"
 #include "Application.hpp"
 
 static Application app;

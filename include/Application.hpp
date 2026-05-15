@@ -16,6 +16,7 @@ private:
     void HandleSerialCommands();
     bool ProcessLine(const char* line);
     size_t BeginsWith(const char* line, const char* prefix_P);
+    void PrintSystemInfo();
 private:
     SMS m_SMS;   
     

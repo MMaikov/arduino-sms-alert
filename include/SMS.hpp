@@ -8,11 +8,11 @@
 struct Message
 {
 	const char* phoneNumber;
-	const __FlashStringHelper* message;
+	const FlashString* message;
 	Message()
 		: phoneNumber(nullptr), message(nullptr)
 	{}
-	Message(const char* number, const __FlashStringHelper* message)
+	Message(const char* number, const FlashString* message)
 		: phoneNumber(number), message(message)
 	{}
 };
@@ -23,7 +23,8 @@ enum class ModemStatus
 	SendSMS,
 	SendCMD,
 	WaitForPrompt,
-	WaitForOk
+	WaitForOk,
+    FinishError
 };
 
 class SMS
@@ -47,6 +48,6 @@ private:
 	ModemStatus m_Status;
 	unsigned long m_LastTime;
 	bool m_WriteToSerial = false;
-	int m_MatchIdx = 0;
-    bool m_Enabled = false;
+    char m_CurrentChar;
+	char m_PreviousChar;
 };

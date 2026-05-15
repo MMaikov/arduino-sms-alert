@@ -1,13 +1,15 @@
 #include "SMS.hpp"
 
 SMS::SMS(uint8_t rx, uint8_t tx)
-		: m_SmsSerial(rx, tx), m_Command(nullptr), m_Status(ModemStatus::Ready), m_LastTime(millis())
+		: m_SmsSerial(rx, tx), m_Command(nullptr), m_Status(ModemStatus::Ready), m_LastTime(millis()),
+          m_CurrentChar('\0'), m_PreviousChar('\0')
 {
 }
 
 void SMS::begin(long speed) {
     pinMode(SMS_MODULE_PWRKEY, OUTPUT);
     
+    // Enable the modem by pulsing the power button
     digitalWrite(SMS_MODULE_PWRKEY, HIGH);
     delay(1000);
     digitalWrite(SMS_MODULE_PWRKEY, LOW);
@@ -71,14 +73,14 @@ void SMS::update() {
         m_LastTime = millis();
     }
 
-    const char match[] = "OK";
     while (m_SmsSerial.available() > 0) {
-        char currentChar = m_SmsSerial.read();
+        m_PreviousChar = m_CurrentChar;
+        m_CurrentChar = m_SmsSerial.read();
         if (m_WriteToSerial) {
-            Serial.write(currentChar);
+            Serial.write(m_CurrentChar);
         }
 
-        if (currentChar == '>') {
+        if (m_PreviousChar == '>' && m_CurrentChar == ' ') {
             if (m_Status == ModemStatus::WaitForPrompt) {
                 m_SmsSerial.print(m_Message.message);
                 m_SmsSerial.write(0x1A);
@@ -90,10 +92,8 @@ void SMS::update() {
             }
         }
 
-        if (currentChar == match[m_MatchIdx]) {
-            m_MatchIdx++;
-            if (match[m_MatchIdx] == '\0') {
-                if (m_Status == ModemStatus::WaitForOk) {
+        if (m_PreviousChar == 'O' && m_CurrentChar == 'K') {
+            if (m_Status == ModemStatus::WaitForOk) {
                     m_Status = ModemStatus::Ready;
                     m_LastTime = millis();
                     if (m_WriteToSerial) {
@@ -101,10 +101,16 @@ void SMS::update() {
                         Serial.print(F("\r\n> "));
                     }
                 }
-                m_MatchIdx = 0;
+        } else if (m_PreviousChar == 'E' && m_CurrentChar == 'R') {
+            if (m_Status == ModemStatus::WaitForOk || m_Status == ModemStatus::WaitForPrompt) {
+                m_Status = ModemStatus::FinishError;
             }
-        } else {
-            m_MatchIdx = 0;
+        } else if (m_PreviousChar == '\r' && m_CurrentChar == '\n' && m_Status == ModemStatus::FinishError) {
+            m_LastTime = millis();
+            if (m_WriteToSerial) {
+                m_WriteToSerial = false;
+                Serial.print(F("\r\n[Error]> "));
+            }
         }
     }
 
