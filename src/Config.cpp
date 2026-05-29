@@ -4,32 +4,69 @@
 
 #include <avr/boot.h>
 
-char Config::s_PhoneNumber[PHONE_NUMBER_BUF_SIZE] = {0};
+uint8_t Config::s_NumPhones = 0xff;
+char Config::s_PhoneNumbers[MAX_PHONE_NUMBERS][PHONE_NUMBER_BUF_SIZE] = {0};
+ThresholdRange Config::s_Thresholds[NUM_CT] = {};
 
-const char* Config::getPhoneNumber() {
-    if (s_PhoneNumber[0] == '\0') {
+uint8_t Config::getNumberOfPhones() {
+    if (s_NumPhones == 0xff) {
+        s_NumPhones = EEPROM.read(EEPROM_NUM_PHONES_ADDRESS);
+    }
+    return s_NumPhones;
+}
+
+const char* Config::getPhoneNumber(int slot) {
+    if (slot < 0 || slot >= MAX_PHONE_NUMBERS) return NULL;
+
+    if (s_PhoneNumbers[slot][0] == '\0') {
         for (size_t i = 0; i < PHONE_NUMBER_BUF_SIZE-1; i++) {
-            s_PhoneNumber[i] = EEPROM.read(EEPROM_PHONE_NUMBER_ADDRESS + i);
-            if ((uint8_t)s_PhoneNumber[i] == 0xff) {
-                s_PhoneNumber[i] = '\0';
+            s_PhoneNumbers[slot][i] = EEPROM.read((EEPROM_PHONES_ADDRESS + slot*PHONE_NUMBER_BUF_SIZE) + i);
+            if ((uint8_t)s_PhoneNumbers[slot][i] == 0xff) {
+                s_PhoneNumbers[slot][i] = '\0';
                 break;
             }
         }
-        s_PhoneNumber[PHONE_NUMBER_BUF_SIZE-1] = '\0';
+        s_PhoneNumbers[slot][PHONE_NUMBER_BUF_SIZE-1] = '\0';
     }
-    return s_PhoneNumber;
+    return s_PhoneNumbers[slot];
 }
 
-void Config::setPhoneNumber(const char* number) {
+ThresholdRange* Config::getThresholds() {
+    if (s_Thresholds[0].empty()) {
+        int start = EEPROM_THRESHOLDS_ADDRESS;
+        for (int i = 0; i < NUM_CT; i++) {
+            EEPROM.get(start, s_Thresholds[i]);
+            start += sizeof(ThresholdRange);
+        }
+    }
+    return s_Thresholds;
+}
+
+void Config::setNumberOfPhones(uint8_t number) {
+    if (number >= MAX_PHONE_NUMBERS) return;
+
+    s_NumPhones = number;
+    EEPROM.update(EEPROM_NUM_PHONES_ADDRESS, number);
+}
+
+void Config::setPhoneNumber(int slot, const char* number) {
+    if (slot < 0 || slot >= MAX_PHONE_NUMBERS) return;
+
     size_t i;
     for (i = 0; i < PHONE_NUMBER_BUF_SIZE-1 && number[i] != '\0'; i++) {
-        s_PhoneNumber[i] = number[i];
-        EEPROM.update(EEPROM_PHONE_NUMBER_ADDRESS + i, number[i]);
+        s_PhoneNumbers[slot][i] = number[i];
+        EEPROM.update((EEPROM_PHONES_ADDRESS + slot*PHONE_NUMBER_BUF_SIZE) + i, number[i]);
     }
-    s_PhoneNumber[i] = '\0';
-    EEPROM.update(EEPROM_PHONE_NUMBER_ADDRESS + i, '\0');
+    s_PhoneNumbers[slot][i] = '\0';
+    EEPROM.update((EEPROM_PHONES_ADDRESS + slot*PHONE_NUMBER_BUF_SIZE) + i, '\0');
 }
 
+void Config::setThreshold(uint8_t index, const ThresholdRange& threshold) {
+    if (index >= NUM_CT) return;
+
+    s_Thresholds[index] = threshold;
+    EEPROM.put(EEPROM_THRESHOLDS_ADDRESS + (index * sizeof(ThresholdRange)), s_Thresholds[index]);
+}
 
 FuseReport Config::getFuseReport()
 {

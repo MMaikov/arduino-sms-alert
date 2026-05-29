@@ -3,8 +3,10 @@
 #include <avr/boot.h>
 #include <avr/wdt.h>
 
+static_assert(NUM_CT==2, "Currently assuming only 2 CTs");
+
 Application::Application()
-    : m_SMS(SMS_MODULE_RX, SMS_MODULE_TX)
+    : m_SMS(SMS_MODULE_RX, SMS_MODULE_TX), m_CT {CurrentTransformer(A0), CurrentTransformer(A1)}, m_DeviceStates { DeviceState::Off, DeviceState::Off }
 {
 }
 
@@ -15,6 +17,10 @@ void Application::Init()
     pinMode(LED_BUILTIN, OUTPUT);
     
 	m_SMS.begin(SMS_MODULE_BAUD_RATE);
+
+    for (int i = 0; i < NUM_CT; i++) {
+        m_CT[i].Init();
+    }
     
 	Serial.begin(TERMINAL_BAUD_RATE);
 	Serial.println(F("\r\nArduino SMS Alert system"));
@@ -27,6 +33,35 @@ void Application::Update()
 
 	m_SMS.update();
 
+    for (int i = 0; i < NUM_CT; i++) {
+        m_CT[i].Update();
+
+        const float value = m_CT[i].getSquaredCount();
+        const ThresholdRange& thresholds = Config::getThresholds()[i];
+        DeviceState& deviceState = m_DeviceStates[i];
+
+        switch (deviceState)
+        {
+        case DeviceState::Off:
+            if (value > thresholds.upper) {
+                // Send SMS
+                Serial.print(F("Device "));
+                Serial.print(i);
+                Serial.println(F(" was turned on"));
+                deviceState = DeviceState::On;
+            }
+            break;
+        case DeviceState::On:
+            if (value < thresholds.lower) {
+                // Send SMS
+                Serial.print(F("Device "));
+                Serial.print(i);
+                Serial.println(F(" was turned off"));
+                deviceState = DeviceState::Off;
+            }
+            break;
+        };
+    }
 
 	HandleSerialCommands();
 }
@@ -61,7 +96,6 @@ void Application::HandleSerialCommands()
 			if (m_InputBufferPtr < INPUT_BUFFER_SIZE) {
 				if (c != '\r') { // Ignore carriage return
 					m_InputBuffer[m_InputBufferPtr++] = c;
-                    
 				}
                 Serial.write(c); // Echo
 			}
@@ -91,6 +125,7 @@ bool Application::ProcessLine(const char* line)
 		Serial.println(F("  at <AT+cmd>             Send command to GSM module"));
 		Serial.println(F("  get <number>            Get parameter data"));
 		Serial.println(F("  set <number>            Set parameter data"));
+		Serial.println(F("  read <number>           Read current from current transformer at slot <number>"));
 		Serial.println();
 	} else if ((n=BeginsWith(line, PSTR("examples"))) > 0) {
 		bool detailed = false;
@@ -146,26 +181,139 @@ bool Application::ProcessLine(const char* line)
 	} else if ((n=BeginsWith(line, PSTR("get"))) > 0) {
 		size_t m;
 		if ((m=BeginsWith(line+n, PSTR("number"))) > 0) {
-			Serial.print(F("Currently defined phone number for SMS is "));
-			Serial.print(Config::getPhoneNumber());
-			Serial.println();
-		}
+            const uint8_t numPhones = Config::getNumberOfPhones();
+
+			Serial.print(F("Currently defined "));
+            Serial.print(numPhones);
+            Serial.println(F(" phone numbers for SMS is "));
+            for (int i = 0; i < numPhones; i++) {
+                Serial.print(i);
+                Serial.print(F(": "));
+                Serial.println(Config::getPhoneNumber(i));
+            }
+		} else if ((m=BeginsWith(line+n, PSTR("threshold"))) > 0) {
+            const char* current_pos = line + n + m;
+            char* next_pos;
+            const long index = strtol(current_pos, &next_pos, 10);
+            if (next_pos > current_pos && index >= 0 && index < NUM_CT) {
+                const ThresholdRange thresholdRange = Config::getThresholds()[index];
+                Serial.print(F("Thresholds for CT"));
+                Serial.print(index);
+                Serial.print(F(" are ["));
+                Serial.print(CurrentTransformer::FromSquaredCount(thresholdRange.lower));
+                Serial.print(F(" A; "));
+                Serial.print(CurrentTransformer::FromSquaredCount(thresholdRange.upper));
+                Serial.println(F(" A]"));
+            } else {
+                Serial.print(F("Invalid value for index, valid values are from 0 to "));
+                Serial.println(NUM_CT);
+            }
+        } else if ((m=BeginsWith(line+n, PSTR("count"))) > 0) {
+            const uint8_t count = Config::getNumberOfPhones();
+            Serial.print(F("Number of phones: "));
+            Serial.println(count);
+        }
+        else {
+            Serial.print(F("Unknown parameter '"));
+            Serial.print(line + n);
+            Serial.println('\'');
+        }
 	} else if ((n=BeginsWith(line, PSTR("set"))) > 0) {
 		size_t m;
 		if ((m=BeginsWith(line+n, PSTR("number"))) > 0) {
-			const char* number = line + n + m;
-			Config::setPhoneNumber(number);
-			Serial.print(F("Set phone number for SMS alerts to "));
-			Serial.println(number);
-		}
+            const char* const current_ptr = line + n + m;
+            char* next_ptr;
+            const long slot = strtol(current_ptr, &next_ptr, 10);
+            if (current_ptr == next_ptr) {
+                Serial.println(F("Failure parsing slot index"));
+                return true;
+            }
+            
+			Config::setPhoneNumber(slot, next_ptr+1);
+			Serial.print(F("Set phone number at slot "));
+            Serial.print(slot);
+            Serial.print(F(" for SMS alerts to"));
+			Serial.println(next_ptr);
+		} else if ((m=BeginsWith(line+n, PSTR("threshold"))) > 0) {
+            const char* parameters = line + n + m;
+            char* next_pos;
+
+            const long index = strtol(parameters, &next_pos, 10);
+            if (parameters == next_pos || index < 0 || index >= NUM_CT) {
+                Serial.println(F("Failed parsing index"));
+                return true;
+            }
+
+            char* current_pos = next_pos;
+            const float lower = strtod(current_pos, &next_pos);
+            if (current_pos == next_pos) {
+                Serial.println(F("Failed parsing lower threshold value"));
+                return true;
+            }
+
+            current_pos = next_pos;
+            const float upper = strtod(current_pos, &next_pos);
+            if (current_pos == next_pos) {
+                Serial.println(F("Failed parsing upper threshold value"));
+                return true;
+            }
+
+            const float lowerCount = CurrentTransformer::CalculateSquaredCount(lower);
+            const float upperCount = CurrentTransformer::CalculateSquaredCount(upper);
+            Config::setThreshold(index, ThresholdRange(lowerCount, upperCount));
+            Serial.print(F("Thresholds ["));
+            Serial.print(lowerCount);
+            Serial.print(F("; "));
+            Serial.print(upperCount);
+            Serial.print(F("] or ["));
+            Serial.print(lower);
+            Serial.print(F(" A; "));
+            Serial.print(upper);
+            Serial.print(F(" A] saved to slot "));
+            Serial.println(index);
+        } else if ((m=BeginsWith(line+n, PSTR("count"))) > 0) {
+            const char* current_ptr = line + n + m;
+            char* next_ptr;
+            const long count = strtol(current_ptr, &next_ptr, 10);
+            if (next_ptr > current_ptr && count >= 0 && count < MAX_PHONE_NUMBERS) {
+                Config::setNumberOfPhones(count);
+                Serial.print(F("Set number of phones to "));
+                Serial.println(count);
+            } else {
+                Serial.println(F("Failed to parse number of phones value"));
+            }
+        } 
+        else {
+            Serial.print(F("Unknown parameter '"));
+            Serial.print(line + n);
+            Serial.println('\'');
+        }
 	} else if ((n=BeginsWith(line, PSTR("sms"))) > 0) {
-		if (m_SMS.sendSMS(Message(Config::getPhoneNumber(), F("This is test SMS sending")))) {
-			Serial.println(F("Sent test SMS message!"));
-		} else {
-			Serial.println(F("[Modem busy]"));
-		}
+        const uint8_t numPhones = Config::getNumberOfPhones();
+        for (int i = 0; i < numPhones; i++) {
+            if (m_SMS.sendSMS(Message(Config::getPhoneNumber(i), F("This is test SMS sending")), true)) {
+                Serial.println(F("Sent test SMS message!"));
+            } else {
+                Serial.println(F("[Modem busy]"));
+            }
+        }
 	} else if (BeginsWith(line, PSTR("info")) > 0) {
         PrintSystemInfo();
+    } else if ((n=BeginsWith(line, PSTR("read"))) > 0) {
+        const int num = atoi(line + n);
+        if (num >= 0 && num < NUM_CT) {
+            const float current = m_CT[num].readCurrent();
+            Serial.print(F("CT "));
+            Serial.print(num);
+            Serial.print(F(" current: "));
+            Serial.print(current);
+            Serial.println(F(" A"));
+        } else {
+            Serial.print(F("Invalid input: '"));
+            Serial.print(num);
+            Serial.print(F("'. Must be between 0 and "));
+            Serial.println(NUM_CT);
+        }
     } else {
 		Serial.print(F("Unkown command '"));
 		Serial.print(line);
@@ -214,7 +362,7 @@ static long readVcc() {
   // REFS1:0 = 01 (Vcc as Ref), MUX3:0 = 1110 (1.1V Bandgap as Input)
   ADMUX = _BV(REFS0) | _BV(MUX3) | _BV(MUX2) | _BV(MUX1);
 
-  delay(2); // Wait for Vref to settle
+  _delay_ms(2); // Wait for Vref to settle
 
   // 3. Start conversion
   ADCSRA |= _BV(ADSC); 

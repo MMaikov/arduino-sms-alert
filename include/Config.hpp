@@ -2,19 +2,33 @@
 
 #include <Arduino.h>
 
-#define TERMINAL_BAUD_RATE 9600
+constexpr unsigned long TERMINAL_BAUD_RATE = 9600;
 
-#define SMS_MODULE_RX 7
-#define SMS_MODULE_TX 8
-#define SMS_MODULE_PWRKEY 12
-#define SMS_MODULE_BAUD_RATE 9600
-#define SMS_TIMEOUT_MS 5000
+constexpr uint8_t SMS_MODULE_RX = 7;
+constexpr uint8_t SMS_MODULE_TX = 8;
+constexpr uint8_t SMS_MODULE_PWRKEY = 12;
+constexpr long SMS_MODULE_BAUD_RATE = 9600;
+constexpr unsigned long SMS_TIMEOUT_MS = 5000;
+
+constexpr float ALPHA_HP = 0.995f;
+constexpr float ALPHA_LP = 0.999f;
+constexpr float ADC_MAX_COUNT = 1024.0f;
+constexpr float BURDEN_RESISTOR = 100.0;
+constexpr float CT_RATIO = 500.0f;
+constexpr float VCC = 5.18f;
+constexpr uint8_t NUM_CT = 2;
 
 // 40 characters + null terminator
-#define INPUT_BUFFER_SIZE 41
+constexpr uint8_t INPUT_BUFFER_SIZE = 41;
 
-#define PHONE_NUMBER_BUF_SIZE 16
-#define EEPROM_PHONE_NUMBER_ADDRESS 0 // 16 bytes
+constexpr uint8_t MAX_PHONE_NUMBERS = 5; // 255th value reserved as not existing
+constexpr uint8_t PHONE_NUMBER_BUF_SIZE = 16;
+
+constexpr uint8_t EEPROM_NUM_PHONES_ADDRESS = 0;
+constexpr uint8_t EEPROM_PHONES_ADDRESS = EEPROM_NUM_PHONES_ADDRESS + 1; // 16 bytes, max 5 so in total 4065
+constexpr uint8_t EEPROM_THRESHOLDS_ADDRESS = EEPROM_PHONES_ADDRESS + (MAX_PHONE_NUMBERS*PHONE_NUMBER_BUF_SIZE); // 16 bytes, max 8 so in total 128 bytes
+
+static_assert(EEPROM_THRESHOLDS_ADDRESS < 1024, "EEPROM capacity exceeded");
 
 using FlashString = __FlashStringHelper;
 
@@ -109,17 +123,37 @@ struct FuseReport {
     uint8_t lockBits;
 };
 
+struct ThresholdRange {
+    float lower = NAN;
+    float upper = NAN;
+
+    constexpr ThresholdRange() {}
+    constexpr ThresholdRange(float lower, float upper) : lower(lower), upper(upper) {}
+
+    bool empty() const {
+        return !isfinite(lower) && !isfinite(upper);
+    }
+};
+
+static_assert(NUM_CT <= 8, "Cannot have more than 8 CTs");
+
 class Config
 {
 public:
-	static const char* getPhoneNumber();
+    static uint8_t getNumberOfPhones();
+	static const char* getPhoneNumber(int slot);
+    static ThresholdRange* getThresholds();
 
-	static void setPhoneNumber(const char* number);
+    static void setNumberOfPhones(uint8_t number);
+	static void setPhoneNumber(int slot, const char* number);
+    static void setThreshold(uint8_t index, const ThresholdRange& threshold);
 
     static FuseReport getFuseReport();
 private:
     static FuseReport parseFuses(uint8_t low, uint8_t high, uint8_t ext, uint8_t lock);
     static StartupTime getStartupTime(ClockSource src, uint8_t lowFuse);
 private:
-	static char s_PhoneNumber[PHONE_NUMBER_BUF_SIZE];
+    static uint8_t s_NumPhones;
+	static char s_PhoneNumbers[MAX_PHONE_NUMBERS][PHONE_NUMBER_BUF_SIZE];
+    static ThresholdRange s_Thresholds[NUM_CT];
 };
